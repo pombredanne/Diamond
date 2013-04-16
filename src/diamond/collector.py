@@ -301,7 +301,7 @@ class Collector(object):
         raise NotImplementedError()
 
     def publish(self, name, value, raw_value=None, precision=0,
-                metric_type='COUNTER'):
+                metric_type='GAUGE'):
         """
         Publish a metric with the given name
         """
@@ -392,7 +392,6 @@ class Collector(object):
                 # Collect Data
                 self.collect()
 
-                self.collect_running = False
                 end_time = time.time()
 
                 if 'measure_collector_time' in self.config:
@@ -405,6 +404,7 @@ class Collector(object):
                 # Log Error
                 self.log.error(traceback.format_exc())
         finally:
+            self.collect_running = False
             # After collector run, invoke a flush
             # method on each handler.
             for handler in self.handlers:
