@@ -276,9 +276,12 @@ class MySQLCollector(diamond.collector.Collector):
     def get_db_stats(self, query):
         cursor = self.db.cursor(cursorclass=MySQLdb.cursors.DictCursor)
 
-        cursor.execute(query)
-
-        return cursor.fetchall()
+        try:
+            cursor.execute(query)
+            return cursor.fetchall()
+        except MySQLError, e:
+            self.log.error('MySQLCollector could not get db stats', e)
+            return ()
 
     def connect(self, params):
         try:
@@ -305,12 +308,11 @@ class MySQLCollector(diamond.collector.Collector):
         return self.get_db_stats('SHOW ENGINE INNODB STATUS')
 
     def get_stats(self, params):
-        metrics = {}
+        metrics = {'status': {}}
 
         if not self.connect(params):
             return metrics
 
-        metrics['status'] = {}
         rows = self.get_db_global_status()
         for row in rows:
             try:
@@ -408,7 +410,7 @@ class MySQLCollector(diamond.collector.Collector):
                     continue
 
                 if metric_name not in self._GAUGE_KEYS:
-                    metric_value = self.derivative(metric_name,
+                    metric_value = self.derivative(nickname + metric_name,
                                                    metric_value)
                 if key == 'status':
                     if ('publish' not in self.config
@@ -425,15 +427,21 @@ class MySQLCollector(diamond.collector.Collector):
 
         for host in self.config['hosts']:
             matches = re.search(
-                '^([^:]*):([^@]*)@([^:]*):([^/]*)/([^/]*)/?(.*)', host)
+                '^([^:]*):([^@]*)@([^:]*):?([^/]*)/([^/]*)/?(.*)', host)
 
             if not matches:
+                self.log.error(
+                    'Connection string not in required format, skipping: %s',
+                    host)
                 continue
 
             params = {}
 
             params['host'] = matches.group(3)
-            params['port'] = int(matches.group(4))
+            try:
+                params['port'] = int(matches.group(4))
+            except ValueError:
+                params['port'] = 3306
             params['db'] = matches.group(5)
             params['user'] = matches.group(1)
             params['passwd'] = matches.group(2)
@@ -445,11 +453,15 @@ class MySQLCollector(diamond.collector.Collector):
             try:
                 metrics = self.get_stats(params=params)
             except Exception, e:
+                try:
+                    self.disconnect()
+                except MySQLdb.ProgrammingError:
+                    pass
                 self.log.error('Collection failed for %s %s', nickname, e)
                 continue
 
             # Warn if publish contains an unknown variable
-            if 'publish' in self.config:
+            if 'publish' in self.config and metrics['status']:
                     for k in self.config['publish'].split():
                         if k not in metrics['status']:
                             self.log.error("No such key '%s' available, issue"

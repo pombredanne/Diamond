@@ -10,6 +10,7 @@ Collect metrics from postgresql
 """
 
 import diamond.collector
+from diamond.collector import str_to_bool
 
 try:
     import psycopg2
@@ -29,7 +30,8 @@ class PostgresqlCollector(diamond.collector.Collector):
             'password': 'Password',
             'port': 'Port number',
             'underscore': 'Convert _ to .',
-            'extended': 'Enable collection of extended database stats',
+            'extended': 'Enable collection of extended database stats.',
+            'metrics': 'List of enabled metrics to collect'
         })
         return config_help
 
@@ -46,7 +48,8 @@ class PostgresqlCollector(diamond.collector.Collector):
             'port': 5432,
             'underscore': False,
             'extended': False,
-            'method': 'Threaded'
+            'method': 'Threaded',
+            'metrics': []
         })
         return config
 
@@ -60,16 +63,23 @@ class PostgresqlCollector(diamond.collector.Collector):
         for db in self._get_db_names():
             self.connections[db] = self._connect(database=db)
 
-        if self.config['extended']:
+        if self.config['metrics']:
+            metrics = self.config['metrics']
+        elif str_to_bool(self.config['extended']):
             metrics = registry['extended']
         else:
             metrics = registry['basic']
 
         # Iterate every QueryStats class
-        for klass in metrics:
+        for metric_name in set(metrics):
+            if metric_name not in metrics_registry:
+                continue
+            klass = metrics_registry[metric_name]
             stat = klass(self.connections, underscore=self.config['underscore'])
             stat.fetch()
-            [self.publish(metric, value) for metric, value in stat]
+            for metric, value in stat:
+                if value is not None:
+                    self.publish(metric, value)
 
         # Cleanup
         [conn.close() for conn in self.connections.itervalues()]
@@ -92,13 +102,18 @@ class PostgresqlCollector(diamond.collector.Collector):
             datnames = ['postgres']
         return datnames
 
-    def _connect(self, database=''):
-        conn = psycopg2.connect(
-            host=self.config['host'],
-            user=self.config['user'],
-            password=self.config['password'],
-            port=self.config['port'],
-            database=database)
+    def _connect(self, database=None):
+        conn_args = {
+          'host': self.config['host'],
+          'user': self.config['user'],
+          'password': self.config['password'],
+          'port': self.config['port']
+        }
+
+        if database:
+            conn_args['database'] = database
+
+        conn = psycopg2.connect(**conn_args)
 
         # Avoid using transactions, set isolation level to autocommit
         conn.set_isolation_level(0)
@@ -106,9 +121,10 @@ class PostgresqlCollector(diamond.collector.Collector):
 
 
 class QueryStats(object):
-    def __init__(self, conns, underscore=False):
+    def __init__(self, conns, parameters=None, underscore=False):
         self.connections = conns
         self.underscore = underscore
+        self.parameters = parameters
 
     def _translate_datname(self, db):
         if self.underscore:
@@ -120,7 +136,7 @@ class QueryStats(object):
 
         for db, conn in self.connections.iteritems():
             cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-            cursor.execute(self.query)
+            cursor.execute(self.query, self.parameters)
 
             for row in cursor.fetchall():
                 # If row is length 2, assume col1, col2 forms key: value
@@ -181,7 +197,6 @@ class DatabaseStats(QueryStats):
                pg_stat_database.tup_inserted as tup_inserted,
                pg_stat_database.tup_updated as tup_updated,
                pg_stat_database.tup_deleted as tup_deleted,
-               pg_stat_database.conflicts as conflicts,
                pg_database_size(pg_database.datname) AS size
         FROM pg_database
         JOIN pg_stat_database
@@ -326,7 +341,6 @@ class BackgroundWriterStats(QueryStats):
                buffers_clean,
                maxwritten_clean,
                buffers_backend,
-               buffers_backend_fsync,
                buffers_alloc
         FROM pg_stat_bgwriter
     """
@@ -434,28 +448,48 @@ class TupleAccessStats(QueryStats):
     """
 
 
+metrics_registry = {
+    'DatabaseStats': DatabaseStats,
+    'DatabaseConnectionCount': DatabaseConnectionCount,
+    'UserTableStats': UserTableStats,
+    'UserIndexStats': UserIndexStats,
+    'UserTableIOStats': UserTableIOStats,
+    'UserIndexIOStats': UserIndexIOStats,
+    'ConnectionStateStats': ConnectionStateStats,
+    'LockStats': LockStats,
+    'RelationSizeStats': RelationSizeStats,
+    'BackgroundWriterStats': BackgroundWriterStats,
+    'WalSegmentStats': WalSegmentStats,
+    'TransactionCount': TransactionCount,
+    'IdleInTransactions': IdleInTransactions,
+    'LongestRunningQueries': LongestRunningQueries,
+    'UserConnectionCount': UserConnectionCount,
+    'TableScanStats': TableScanStats,
+    'TupleAccessStats': TupleAccessStats,
+}
+
 registry = {
     'basic': (
-        DatabaseStats,
-        DatabaseConnectionCount,
+        'DatabaseStats',
+        'DatabaseConnectionCount',
     ),
     'extended': (
-        DatabaseStats,
-        DatabaseConnectionCount,
-        UserTableStats,
-        UserIndexStats,
-        UserTableIOStats,
-        UserIndexIOStats,
-        ConnectionStateStats,
-        LockStats,
-        RelationSizeStats,
-        BackgroundWriterStats,
-        WalSegmentStats,
-        TransactionCount,
-        IdleInTransactions,
-        LongestRunningQueries,
-        UserConnectionCount,
-        TableScanStats,
-        TupleAccessStats,
+        'DatabaseStats',
+        'DatabaseConnectionCount',
+        'UserTableStats',
+        'UserIndexStats',
+        'UserTableIOStats',
+        'UserIndexIOStats',
+        'ConnectionStateStats',
+        'LockStats',
+        'RelationSizeStats',
+        'BackgroundWriterStats',
+        'WalSegmentStats',
+        'TransactionCount',
+        'IdleInTransactions',
+        'LongestRunningQueries',
+        'UserConnectionCount',
+        'TableScanStats',
+        'TupleAccessStats',
     ),
 }

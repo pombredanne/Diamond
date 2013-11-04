@@ -84,6 +84,16 @@ class method:
     threaded = "threaded"
 
 
+class SchedulerNotRunning(Exception):
+    """Interrupt a running scheduler.
+
+    This exception is used to break out of sched.sched.run when we
+    are not running.
+
+    """
+    pass
+
+
 class Scheduler:
     """The Scheduler itself."""
 
@@ -108,11 +118,14 @@ class Scheduler:
                     and stoptime > time.time()
                     and self._getqueuetoptime() == toptime):
                 time.sleep(period)
-            if not self.running or self._getqueuetoptime() != toptime:
-                return
-            now = time.time()
-            if endtime > now:
-                time.sleep(endtime - now)
+
+            if self.running and self._getqueuetoptime() == toptime:
+                now = time.time()
+                if endtime > now:
+                    time.sleep(endtime - now)
+
+        if not self.running:
+            raise SchedulerNotRunning()
 
     def _acquire_lock(self):
         pass
@@ -252,7 +265,7 @@ class Scheduler:
     def stop(self):
         """Remove all pending tasks and stop the Scheduler."""
         self.running = False
-        self._clearschedqueue()
+        # Pending tasks are removed in _run.
 
     def cancel(self, task):
         """Cancel given scheduled task."""
@@ -279,6 +292,8 @@ class Scheduler:
         while self.running:
             try:
                 self.sched.run()
+            except SchedulerNotRunning:
+                self._clearschedqueue()
             except Exception, x:
                 self.log.error("ERROR DURING SCHEDULER EXECUTION %s \n %s", x,
                         "".join(traceback.format_exception(*sys.exc_info())))
@@ -287,7 +302,7 @@ class Scheduler:
                 time.sleep(5)
 
 
-class Task:
+class Task(object):
     """Abstract base class of all scheduler tasks"""
 
     def __init__(self, name, action, args, kw):
@@ -466,7 +481,7 @@ try:
             self._lock.acquire()
 
         def _release_lock(self):
-            """Release the lock on th ethread's task queue."""
+            """Release the lock on the thread's task queue."""
             self._lock.release()
 
     class ThreadedTaskMixin:
@@ -487,7 +502,14 @@ try:
 
     class ThreadedIntervalTask(ThreadedTaskMixin, IntervalTask):
         """Interval Task that executes in its own thread."""
-        pass
+
+        def __init__(self, name, interval, action, args=None, kw=None,
+                     abs=False):
+            # Force abs to be False, as in threaded mode we reschedule
+            # immediately.
+            super(ThreadedIntervalTask, self).__init__(name, interval, action,
+                                                       args=args, kw=kw,
+                                                       abs=False)
 
     class ThreadedSingleTask(ThreadedTaskMixin, SingleTask):
         """Single Task that executes in its own thread."""
@@ -556,7 +578,14 @@ if hasattr(os, "fork"):
 
     class ForkedIntervalTask(ForkedTaskMixin, IntervalTask):
         """Interval Task that executes in its own process."""
-        pass
+
+        def __init__(self, name, interval, action, args=None, kw=None,
+                     abs=False):
+            # Force abs to be False, as in forked mode we reschedule
+            # immediately.
+            super(ForkedIntervalTask, self).__init__(name, interval, action,
+                                                     args=args, kw=kw,
+                                                     abs=False)
 
     class ForkedSingleTask(ForkedTaskMixin, SingleTask):
         """Single Task that executes in its own process."""

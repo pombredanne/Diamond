@@ -29,6 +29,8 @@ collectors_config_path = /etc/diamond/collectors/
 # Directory to load handler configs from
 handlers_config_path = /etc/diamond/handlers/
 
+handlers_path = /usr/share/diamond/handlers/
+
 # Interval to reload collectors
 collectors_reload_interval = 3600
 
@@ -110,6 +112,12 @@ timeout = 15
 user = user@example.com
 apikey = abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz01
 
+[[HostedGraphiteHandler]]
+apikey = abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz01
+timeout = 15
+batch = 1
+
+# And any other config settings from GraphiteHandler are valid here
 
 [[HttpPostHandler]]
 
@@ -153,6 +161,13 @@ batch = 100
 # such as: %(path_prefix)s.$(hostname)s.$(path_suffix)s.$(metric)s
 # path_prefix = servers
 # path_suffix =
+
+# Path Prefix for Virtual Machines
+# If the host supports virtual machines, collectors may report per
+# VM metrics. Following OpenStack nomenclature, the prefix for
+# reporting per VM metrics is "instances", and metric foo for VM
+# bar will be reported as: instances.bar.foo...
+# instance_prefix = instances
 
 # Default Poll Interval (seconds)
 # interval = 300

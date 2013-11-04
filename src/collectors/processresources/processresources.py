@@ -9,7 +9,7 @@ Example config file ProcessResourcesCollector.conf
 
 ```
 enabled=True
-unit=kB
+unit=B
 cpu_interval=0.1
 [process]
 [[postgres]]
@@ -21,6 +21,10 @@ selfmon=True
 ```
 
 exe and name are both lists of comma-separated regexps.
+
+count_workers defined under [process] will determine whether to count how many
+workers are there of processes which match this [process],
+for example: cgi workers.
 
 cpu_interval is the interval in seconds used to calculate cpu usage percentage.
 From psutil's docs:
@@ -106,7 +110,7 @@ calls."""),
             'path': 'memory.process',
             'unit': 'B',
             'process': '',
-            'cpu_interval': 0.1
+            'cpu_interval': 0.0
         })
         return config
 
@@ -118,7 +122,8 @@ calls."""),
             name: [regex],
             cmdline: [regex],
             selfmon: [boolean],
-            procs: [psutil.Process]
+            procs: [psutil.Process],
+            count_workers: [boolean]
         }
         """
         self.processes = {}
@@ -132,6 +137,8 @@ calls."""),
                     proc[key] = [proc[key]]
                 proc[key] = [re.compile(e) for e in proc[key]]
             proc['selfmon'] = cfg.get('selfmon', '').lower() == 'true'
+            proc['count_workers'] = cfg.get(
+                'count_workers', '').lower() == 'true'
             self.processes[process] = proc
 
     def filter_processes(self):
@@ -171,27 +178,40 @@ calls."""),
         Collects the RSS memory usage of each process defined under the
         `process` subsection of the config file
         """
-        self.setup_config()
-        self.filter_processes()
-        unit = self.config['unit']
-        for process, cfg in self.processes.items():
-            # finally publish the results for each process group
-            metric_name = "%s.rss" % process
-            metric_value = diamond.convertor.binary.convert(
-                sum(p.rss for p in cfg['procs']),
-                oldUnit='byte', newUnit=unit)
-            # Publish Metric
-            self.publish(metric_name, metric_value)
+        if not psutil:
+            self.log.error('Unable to import psutil')
+            self.log.error('No process resource metrics retrieved')
+            return None
 
-            metric_name = "%s.vms" % process
-            metric_value = diamond.convertor.binary.convert(
-                sum(p.vms for p in cfg['procs']),
-                oldUnit='byte', newUnit=unit)
-            # Publish Metric
-            self.publish(metric_name, metric_value)
+        try:
+            self.setup_config()
+            self.filter_processes()
+            unit = self.config['unit']
+            for process, cfg in self.processes.items():
+                # finally publish the results for each process group
+                metric_name = "%s.rss" % process
+                metric_value = diamond.convertor.binary.convert(
+                    sum(p.rss for p in cfg['procs']),
+                    oldUnit='byte', newUnit=unit)
+                # Publish Metric
+                self.publish(metric_name, metric_value)
 
-            # CPU percent
-            metric_name = "%s.cpu_percent" % process
-            metric_value = sum(p.cpu_percent for p in cfg['procs'])
-            # Publish Metric
-            self.publish(metric_name, metric_value)
+                metric_name = "%s.vms" % process
+                metric_value = diamond.convertor.binary.convert(
+                    sum(p.vms for p in cfg['procs']),
+                    oldUnit='byte', newUnit=unit)
+                # Publish Metric
+                self.publish(metric_name, metric_value)
+
+                # CPU percent
+                metric_name = "%s.cpu_percent" % process
+                metric_value = sum(p.cpu_percent for p in cfg['procs'])
+                # Publish Metric
+                self.publish(metric_name, metric_value)
+
+                if cfg['count_workers']:
+                    metric_name = '%s.workers' % process
+                    metric_value = len(cfg['procs'])
+                    self.publish(metric_name, metric_value)
+        except Exception, e:
+            self.log.error(str(e))

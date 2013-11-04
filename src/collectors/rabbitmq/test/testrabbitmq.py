@@ -2,6 +2,7 @@
 # coding=utf-8
 ################################################################################
 
+import sys
 from test import CollectorTestCase
 from test import get_collector_config
 from test import unittest
@@ -16,11 +17,13 @@ from rabbitmq import RabbitMQCollector
 
 
 def run_only_if_pyrabbit_is_available(func):
-    try:
-        import pyrabbit
-        pyrabbit  # workaround for pyflakes issue #13
-    except ImportError:
-        pyrabbit = None
+    pyrabbit = None
+    if sys.version_info > (2, 5):
+        try:
+            import pyrabbit
+            pyrabbit  # workaround for pyflakes issue #13
+        except ImportError:
+            pyrabbit = None
     pred = lambda: pyrabbit is not None
     return run_only(func, pred)
 
@@ -42,9 +45,6 @@ class TestRabbitMQCollector(CollectorTestCase):
     @patch.object(Collector, 'publish')
     def test_should_publish_nested_keys(self, publish_mock, client_mock):
         client = Mock()
-        vhost_data = [
-            {'name': 'localhost'},
-        ]
         queue_data = {
             'more_keys': {'nested_key': 1},
             'key': 2,
@@ -57,14 +57,12 @@ class TestRabbitMQCollector(CollectorTestCase):
             'string': 'string',
         }
         client_mock.return_value = client
-        client.get_all_vhosts.return_value = vhost_data
         client.get_queues.return_value = [queue_data]
         client.get_overview.return_value = overview_data
 
         self.collector.collect()
 
-        client.get_all_vhosts.assert_called_once_with()
-        client.get_queues.assert_called_once_with(vhost='localhost')
+        client.get_queues.assert_called_once_with()
         client.get_overview.assert_called_once_with()
         metrics = {
             'queues.test_queue.more_keys.nested_key': 1,

@@ -60,8 +60,11 @@ class Server(object):
                 configfile = os.path.join(
                     config['server']['handlers_config_path'],
                     configname)
-                config['handlers'][handlername].merge(
-                    configobj.ConfigObj(configfile))
+                hconfig = configobj.ConfigObj(configfile)
+                if handlername in config['handlers']:
+                    config['handlers'][handlername].merge(hconfig)
+                else:
+                    config['handlers'][handlername] = hconfig
 
         self.config = config
 
@@ -103,7 +106,7 @@ class Server(object):
                 # Initialize Handler class
                 self.handlers.append(cls(handler_config))
 
-            except ImportError:
+            except (ImportError, SyntaxError):
                 # Log Error
                 self.log.debug("Failed to load handler %s. %s", h,
                                traceback.format_exc())
@@ -126,8 +129,12 @@ class Server(object):
         """
         Scan for and add paths to the include path
         """
-        # Add path to the system path
-        sys.path.append(path)
+        # Verify the path is valid
+        if not os.path.isdir(path):
+            return
+        # Add path to the system path, to avoid name clashes
+        # with mysql-connector for example ...
+        sys.path.insert(1, path)
         # Load all the files in path
         for f in os.listdir(path):
             # Are we a directory? If so process down the tree
@@ -191,7 +198,7 @@ class Server(object):
                 try:
                     # Import the module
                     mod = __import__(modname, globals(), locals(), ['*'])
-                except ImportError:
+                except (ImportError, SyntaxError):
                     # Log error
                     self.log.error("Failed to import module: %s. %s", modname,
                                    traceback.format_exc())
@@ -257,7 +264,7 @@ class Server(object):
             return
 
         if c.config['enabled'] != True:
-            self.log.warn("Skipped loading disabled Collector: %s",
+            self.log.debug("Skipped loading disabled Collector: %s",
                           c.__class__.__name__)
             return
 
@@ -312,6 +319,9 @@ class Server(object):
         self.running = True
 
         # Load handlers
+        if 'handlers_path' in self.config['server']:
+            handlers_path = self.config['server']['handlers_path']
+            self.load_include_path(handlers_path)
         self.load_handlers()
 
         # Load config
@@ -340,6 +350,9 @@ class Server(object):
         self.running = True
 
         # Load handlers
+        if 'handlers_path' in self.config['server']:
+            handlers_path = self.config['server']['handlers_path']
+            self.load_include_path(handlers_path)
         self.load_handlers()
 
         # Overrides collector config dir

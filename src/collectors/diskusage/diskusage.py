@@ -59,7 +59,8 @@ class DiskUsageCollector(diamond.collector.Collector):
         config.update({
             'enabled':  'True',
             'path':     'iostat',
-            'devices':  ('md[0-9]+$'
+            'devices':  ('PhysicalDrive[0-9]+$'
+                         + '|md[0-9]+$'
                          + '|sd[a-z]+[0-9]*$'
                          + '|x?vd[a-z]+[0-9]*$'
                          + '|disk[0-9]+$'
@@ -117,7 +118,11 @@ class DiskUsageCollector(diamond.collector.Collector):
                         continue
             finally:
                 fp.close()
-        elif psutil:
+        else:
+            if not psutil:
+                self.log.error('Unable to import psutil')
+                return None
+
             disks = psutil.disk_io_counters(True)
             for disk in disks:
                     result[(0, len(result))] = {
@@ -155,7 +160,12 @@ class DiskUsageCollector(diamond.collector.Collector):
         exp = self.config['devices']
         reg = re.compile(exp)
 
-        for key, info in self.get_disk_statistics().iteritems():
+        results = self.get_disk_statistics()
+        if not results:
+            self.log.error('No diskspace metrics retrieved')
+            return None
+
+        for key, info in results.iteritems():
             metrics = {}
 
             name = info['device']

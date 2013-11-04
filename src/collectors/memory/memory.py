@@ -3,6 +3,10 @@
 """
 This class collects data on memory utilization
 
+Note that MemFree may report no memory free. This may not actually be the case,
+as memory is allocated to Buffers and Cache as well. See
+[this link](http://www.linuxatemyram.com/) for more details.
+
 #### Dependencies
 
 * /proc/meminfo or psutil
@@ -94,10 +98,15 @@ class MemoryCollector(diamond.collector.Collector):
                 except ValueError:
                     continue
             return True
-        elif psutil:
+        else:
+            if not psutil:
+                self.log.error('Unable to import psutil')
+                self.log.error('No memory metrics retrieved')
+                return None
+
             phymem_usage = psutil.phymem_usage()
             virtmem_usage = psutil.virtmem_usage()
-            units = 'b'
+            units = 'B'
 
             for unit in self.config['byte_unit']:
                 value = diamond.convertor.binary.convert(
